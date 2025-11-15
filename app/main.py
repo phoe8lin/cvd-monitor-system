@@ -43,9 +43,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def load_and_process_data():
-    """加载并处理数据（缓存60秒）"""
+    """加载并处理数据（缓存30秒）"""
     try:
         loader = DataLoader(DATA_PATH)
         df = loader.load_data()
@@ -61,7 +61,17 @@ def main():
     # 页面标题
     st.markdown('<h1 class="main-header">📊 CVD监测系统</h1>', unsafe_allow_html=True)
 
+    # 添加刷新按钮
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col3:
+        refresh_button = st.button("🔄 刷新数据", type="primary")
+
     # 加载数据
+    # 如果点击刷新按钮，清除缓存并重新加载
+    if refresh_button:
+        st.cache_data.clear()
+        st.rerun()
+
     with st.spinner("正在加载数据..."):
         df = load_and_process_data()
 
@@ -122,6 +132,31 @@ def main():
         st.header("CVD曲线分析 (Z-Score标准化)")
         st.write("Z-Score标准化后的CVD曲线，Y轴表示偏离均值的标准差数量")
 
+        # Z-Score说明
+        with st.expander("📘 关于Z-Score分析", expanded=False):
+            st.markdown("""
+            ### Z-Score标准化原理
+            **Z-Score公式**: `(当前CVD值 - 均值) / 标准差`
+
+            ### 分析方法
+            - **无单位，可比较**: 所有数据都转换为"偏离均值多少个标准差"的单位
+            - **直接比较不同标的**: Z-Score为2的标的，其资金推动强度远大于Z-Score为0.5的标的
+
+            ### 动能解读
+            - **零轴上方**: 资金净流入强于平均水平
+            - **零轴下方**: 资金净流入弱于平均水平
+
+            ### 关键区域
+            - **Z-Score > +1**: 持续位于高位且向上倾斜 → 🔴 **强势买入动能**
+            - **Z-Score < -1**: 持续位于低位且向下倾斜 → 🟢 **强势卖出动能**
+            - **零轴附近**: 动能中性，多空平衡 → ⚪ **中性状态**
+
+            ### 参考线说明
+            - **灰色实线**: 零轴（均值线）
+            - **红色虚线**: +1标准差阈值
+            - **绿色虚线**: -1标准差阈值
+            """)
+
         # 计算Z-Score
         zscore_calc = CVDScoreCalculator()
         df_with_zscore = zscore_calc.calculate_all_z_scores(filtered_df)
@@ -166,22 +201,6 @@ def main():
         )
 
         st.plotly_chart(fig, use_container_width=True)
-
-        # 显示关键统计信息
-        st.subheader("关键指标")
-        col1, col2, col3 = st.columns(3)
-
-        latest_data = df_with_zscore.sort_values('timestamp').groupby('symbol').tail(1)
-        max_zscore = latest_data['cvd_zscore'].max()
-        min_zscore = latest_data['cvd_zscore'].min()
-        avg_zscore = latest_data['cvd_zscore'].mean()
-
-        with col1:
-            st.metric("最高Z-Score", f"{max_zscore:.2f}")
-        with col2:
-            st.metric("最低Z-Score", f"{min_zscore:.2f}")
-        with col3:
-            st.metric("平均Z-Score", f"{avg_zscore:.2f}")
 
     with tab2:
         st.header("排名统计")
@@ -310,6 +329,8 @@ def main():
             if display_symbols:
                 # 计算背离数据
                 divergence_data = divergence_detector.calculate_divergence_data(df_3day, display_symbols)
+                # 获取背离点信息
+                divergence_points = divergence_detector.get_divergence_points(df_3day)
 
                 if not divergence_data.empty:
                     fig = go.Figure()
@@ -332,23 +353,39 @@ def main():
                                               '<extra></extra>'
                             ))
 
-                            # 绘制Z-Score（右Y轴）
+                            # 绘制CVD曲线（右Y轴）
                             fig.add_trace(go.Scatter(
                                 x=symbol_data['timestamp'],
-                                y=symbol_data['cvd_zscore'],
+                                y=symbol_data['cvd'],
                                 mode='lines',
-                                name=f'{symbol} - Z-Score',
+                                name=f'{symbol} - CVD',
                                 line=dict(width=2, color='red'),
                                 yaxis='y2',
                                 hovertemplate='<b>%{fullData.name}</b><br>' +
                                               '时间: %{x}<br>' +
-                                              'Z-Score: %{y:.2f}<br>' +
+                                              'CVD: %{y:.2f}<br>' +
                                               '<extra></extra>'
                             ))
 
-                    # 添加Z-Score阈值线
-                    fig.add_hline(y=DIVERGENCE_ZSCORE_THRESHOLD, line_dash="dash", line_color="red", opacity=0.3)
-                    fig.add_hline(y=-DIVERGENCE_ZSCORE_THRESHOLD, line_dash="dash", line_color="red", opacity=0.3)
+                            # 绘制背离线（背离点的连线）
+                            if symbol in divergence_points and len(divergence_points[symbol]) > 1:
+                                points = divergence_points[symbol]
+                                point_timestamps = [p['timestamp'] for p in points]
+                                point_prices = [p['price'] for p in points]
+
+                                fig.add_trace(go.Scatter(
+                                    x=point_timestamps,
+                                    y=point_prices,
+                                    mode='lines+markers',
+                                    name=f'{symbol} - 背离线',
+                                    line=dict(width=3, color='orange', dash='dot'),
+                                    marker=dict(size=10, color='orange', symbol='diamond'),
+                                    yaxis='y',
+                                    hovertemplate='<b>%{fullData.name}</b><br>' +
+                                                  '背离时间: %{x}<br>' +
+                                                  '价格: %{y:.2f}<br>' +
+                                                  '<extra></extra>'
+                                ))
 
                     # 更新布局（双Y轴）
                     fig.update_layout(
@@ -360,7 +397,7 @@ def main():
                             color="blue"
                         ),
                         yaxis2=dict(
-                            title="CVD Z-Score",
+                            title="CVD值",
                             side="right",
                             overlaying="y",
                             color="red"
@@ -376,6 +413,19 @@ def main():
                     )
 
                     st.plotly_chart(fig, use_container_width=True)
+
+                    # 显示背离点详细信息
+                    st.subheader("背离点详情")
+                    for symbol in display_symbols:
+                        if symbol in divergence_points:
+                            st.write(f"**{symbol}** 背离点:")
+                            for i, point in enumerate(divergence_points[symbol], 1):
+                                st.write(
+                                    f"  {i}. 时间: {point['timestamp']}, "
+                                    f"价格: {point['price']:.2f}, "
+                                    f"CVD: {point['cvd']:.2f}, "
+                                    f"Z-Score: {point['cvd_zscore']:.2f}"
+                                )
         else:
             st.info("ℹ️ 当前未检测到明显的背离")
 

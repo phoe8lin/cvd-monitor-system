@@ -209,3 +209,62 @@ class DivergenceDetector:
             return pd.concat(result_data, ignore_index=True)
         else:
             return pd.DataFrame()
+
+    def get_divergence_points(self, df: pd.DataFrame) -> Dict[str, List[Dict]]:
+        """
+        获取背离点的详细信息
+
+        Args:
+            df: 原始数据
+
+        Returns:
+            Dict: {symbol: [{'timestamp': ..., 'price': ..., 'cvd': ...}, ...]}
+        """
+        divergence_points = {}
+
+        for symbol in df['symbol'].unique():
+            symbol_data = df[df['symbol'] == symbol].sort_values('timestamp').copy()
+
+            if len(symbol_data) < 10:
+                continue
+
+            # 计算价格变化
+            symbol_data['price_change'] = symbol_data['price'].pct_change()
+
+            # 计算Z-Score
+            zscore_calc = CVDScoreCalculator()
+            symbol_data = zscore_calc.calculate_all_z_scores(symbol_data)
+
+            # 检测背离
+            cvd_extreme = symbol_data[
+                (symbol_data['cvd_zscore'] > self.zscore_threshold) |
+                (symbol_data['cvd_zscore'] < -self.zscore_threshold)
+            ]
+
+            if len(cvd_extreme) == 0:
+                continue
+
+            # 记录背离点
+            points = []
+            for idx in cvd_extreme.index:
+                window = symbol_data.loc[:idx].tail(10)
+
+                if len(window) < 5:
+                    continue
+
+                cvd_trend = window['cvd_zscore'].iloc[-1] - window['cvd_zscore'].iloc[0]
+                price_trend = (window['price'].iloc[-1] - window['price'].iloc[0]) / window['price'].iloc[0]
+
+                if (cvd_trend > 0 and price_trend < -self.price_change_threshold) or \
+                   (cvd_trend < 0 and price_trend > self.price_change_threshold):
+                    points.append({
+                        'timestamp': symbol_data.loc[idx, 'timestamp'],
+                        'price': symbol_data.loc[idx, 'price'],
+                        'cvd': symbol_data.loc[idx, 'cvd'],
+                        'cvd_zscore': symbol_data.loc[idx, 'cvd_zscore']
+                    })
+
+            if points:
+                divergence_points[symbol] = points
+
+        return divergence_points
