@@ -1,6 +1,6 @@
 """
-CVD分析模块
-负责计算Z-Score、排名和背离检测
+CVD分析模块 - 新版本
+负责计算Z-Score、排名和背离检测（基于区间对比）
 """
 import pandas as pd
 import numpy as np
@@ -106,22 +106,45 @@ class RankCalculator:
 
 
 class DivergenceDetector:
-    """CVD与价格背离检测器"""
+    """CVD与价格背离检测器（基于区间对比）"""
 
-    def __init__(self, zscore_threshold: float = 1.0, price_change_threshold: float = 0.05):
+    def __init__(self, zscore_threshold: float = 1.0, price_change_threshold: float = 0.05, window_size: int = 30):
         """
         初始化背离检测器
 
         Args:
             zscore_threshold: Z-Score阈值（默认1.0）
             price_change_threshold: 价格变化阈值（默认5%）
+            window_size: 滑动窗口大小（默认30分钟）
         """
         self.zscore_threshold = zscore_threshold
         self.price_change_threshold = price_change_threshold
+        self.window_size = window_size
+
+    def calculate_trend(self, series: pd.Series) -> float:
+        """
+        计算序列的趋势（使用线性回归斜率）
+
+        Args:
+            series: 数据序列
+
+        Returns:
+            float: 趋势斜率（正值表示上升，负值表示下降）
+        """
+        if len(series) < 2:
+            return 0
+
+        # 使用线性回归计算趋势
+        x = np.arange(len(series))
+        y = series.values
+
+        # 计算斜率
+        slope = np.polyfit(x, y, 1)[0]
+        return slope
 
     def detect_divergences(self, df: pd.DataFrame) -> List[str]:
         """
-        检测CVD与价格背离的标的
+        检测CVD与价格背离的标的（基于区间对比）
 
         Args:
             df: 包含价格和CVD数据的DataFrame
@@ -134,48 +157,118 @@ class DivergenceDetector:
         for symbol in df['symbol'].unique():
             symbol_data = df[df['symbol'] == symbol].sort_values('timestamp').copy()
 
-            if len(symbol_data) < 10:  # 数据点太少
+            if len(symbol_data) < self.window_size * 2:  # 数据点太少
                 continue
-
-            # 计算价格变化
-            symbol_data['price_change'] = symbol_data['price'].pct_change()
 
             # 计算Z-Score
             zscore_calc = CVDScoreCalculator()
             symbol_data = zscore_calc.calculate_all_z_scores(symbol_data)
 
-            # 检测背离
-            # 1. CVD极值（Z-Score > 阈值或 < -阈值）
-            cvd_extreme = symbol_data[
-                (symbol_data['cvd_zscore'] > self.zscore_threshold) |
-                (symbol_data['cvd_zscore'] < -self.zscore_threshold)
-            ]
+            # 滑动窗口检测背离
+            divergence_periods = self._detect_divergence_periods(symbol_data)
 
-            if len(cvd_extreme) == 0:
-                continue
-
-            # 2. 价格变化趋势与CVD趋势相反
-            for idx in cvd_extreme.index:
-                window = symbol_data.loc[:idx].tail(10)  # 查看前10个数据点
-
-                if len(window) < 5:
-                    continue
-
-                # CVD趋势
-                cvd_trend = window['cvd_zscore'].iloc[-1] - window['cvd_zscore'].iloc[0]
-
-                # 价格趋势
-                price_trend = (window['price'].iloc[-1] - window['price'].iloc[0]) / window['price'].iloc[0]
-
-                # 背离条件：
-                # - CVD正极值但价格下降，或
-                # - CVD负极值但价格上升
-                if (cvd_trend > 0 and price_trend < -self.price_change_threshold) or \
-                   (cvd_trend < 0 and price_trend > self.price_change_threshold):
-                    divergence_symbols.append(symbol)
-                    break
+            if divergence_periods:
+                divergence_symbols.append(symbol)
 
         return list(set(divergence_symbols))
+
+    def _detect_divergence_periods(self, symbol_data: pd.DataFrame) -> List[Dict]:
+        """
+        检测背离区间
+
+        Args:
+            symbol_data: 单个标的数据
+
+        Returns:
+            List[Dict]: 背离区间列表，每个区间包含开始、结束、强度等信息
+        """
+        divergence_periods = []
+
+        # 滑动窗口检测
+        for i in range(self.window_size, len(symbol_data) - self.window_size):
+            # 获取当前窗口
+            window_start = i - self.window_size
+            window_end = i
+            window_data = symbol_data.iloc[window_start:window_end]
+
+            # 计算CVD趋势（使用Z-Score）
+            cvd_trend = self.calculate_trend(window_data['cvd_zscore'])
+
+            # 计算价格趋势
+            price_trend = self.calculate_trend(window_data['price'])
+
+            # 标准化趋势（除以标准差，使其可比较）
+            cvd_trend_normalized = cvd_trend / (window_data['cvd_zscore'].std() + 1e-10)
+            price_trend_normalized = price_trend / (window_data['price'].std() + 1e-10)
+
+            # 判断背离条件：
+            # 1. CVD趋势显著（绝对值 > 0.1）
+            # 2. 价格趋势显著（绝对值 > 0.1）
+            # 3. 趋势方向相反
+            if (abs(cvd_trend_normalized) > 0.1 and
+                abs(price_trend_normalized) > 0.1 and
+                cvd_trend_normalized * price_trend_normalized < 0):
+
+                # 计算背离强度
+                divergence_strength = min(abs(cvd_trend_normalized), abs(price_trend_normalized))
+
+                # 检查是否与前一个背离区间重叠
+                if divergence_periods:
+                    last_period = divergence_periods[-1]
+                    if i < last_period['end_idx']:
+                        continue  # 跳过重叠的区间
+
+                # 找到背离结束点
+                end_idx = self._find_divergence_end(symbol_data, i, cvd_trend_normalized, price_trend_normalized)
+
+                divergence_periods.append({
+                    'start_idx': window_start,
+                    'end_idx': end_idx,
+                    'start_time': window_data.iloc[0]['timestamp'],
+                    'end_time': symbol_data.iloc[end_idx - 1]['timestamp'],
+                    'cvd_trend': cvd_trend_normalized,
+                    'price_trend': price_trend_normalized,
+                    'strength': divergence_strength,
+                    'duration': end_idx - window_start
+                })
+
+        return divergence_periods
+
+    def _find_divergence_end(self, symbol_data: pd.DataFrame, start_idx: int, cvd_trend: float, price_trend: float) -> int:
+        """
+        找到背离区间的结束点
+
+        Args:
+            symbol_data: 数据
+            start_idx: 背离开始索引
+            cvd_trend: CVD趋势
+            price_trend: 价格趋势
+
+        Returns:
+            int: 结束索引
+        """
+        max_lookahead = self.window_size  # 最多再看window_size个点
+
+        for j in range(start_idx + 5, min(start_idx + max_lookahead, len(symbol_data))):
+            # 获取当前窗口
+            window_data = symbol_data.iloc[j-self.window_size:j]
+
+            # 重新计算趋势
+            current_cvd_trend = self.calculate_trend(window_data['cvd_zscore'])
+            current_price_trend = self.calculate_trend(window_data['price'])
+
+            # 标准化
+            cvd_trend_normalized = current_cvd_trend / (window_data['cvd_zscore'].std() + 1e-10)
+            price_trend_normalized = current_price_trend / (window_data['price'].std() + 1e-10)
+
+            # 如果趋势不再相反，或者趋势减弱，背离结束
+            if (cvd_trend_normalized * price_trend_normalized >= 0 or
+                abs(cvd_trend_normalized) < 0.05 or
+                abs(price_trend_normalized) < 0.05):
+                return j
+
+        # 如果没找到结束点，返回开始点+window_size
+        return min(start_idx + self.window_size, len(symbol_data))
 
     def calculate_divergence_data(self, df: pd.DataFrame, symbols: List[str]) -> pd.DataFrame:
         """
@@ -210,61 +303,32 @@ class DivergenceDetector:
         else:
             return pd.DataFrame()
 
-    def get_divergence_points(self, df: pd.DataFrame) -> Dict[str, List[Dict]]:
+    def get_divergence_periods(self, df: pd.DataFrame) -> Dict[str, List[Dict]]:
         """
-        获取背离点的详细信息
+        获取背离区间信息
 
         Args:
             df: 原始数据
 
         Returns:
-            Dict: {symbol: [{'timestamp': ..., 'price': ..., 'cvd': ...}, ...]}
+            Dict: {symbol: [{'start_time': ..., 'end_time': ..., 'strength': ..., ...}, ...]}
         """
-        divergence_points = {}
+        divergence_periods_dict = {}
 
         for symbol in df['symbol'].unique():
             symbol_data = df[df['symbol'] == symbol].sort_values('timestamp').copy()
 
-            if len(symbol_data) < 10:
+            if len(symbol_data) < self.window_size * 2:
                 continue
-
-            # 计算价格变化
-            symbol_data['price_change'] = symbol_data['price'].pct_change()
 
             # 计算Z-Score
             zscore_calc = CVDScoreCalculator()
             symbol_data = zscore_calc.calculate_all_z_scores(symbol_data)
 
-            # 检测背离
-            cvd_extreme = symbol_data[
-                (symbol_data['cvd_zscore'] > self.zscore_threshold) |
-                (symbol_data['cvd_zscore'] < -self.zscore_threshold)
-            ]
+            # 检测背离区间
+            periods = self._detect_divergence_periods(symbol_data)
 
-            if len(cvd_extreme) == 0:
-                continue
+            if periods:
+                divergence_periods_dict[symbol] = periods
 
-            # 记录背离点
-            points = []
-            for idx in cvd_extreme.index:
-                window = symbol_data.loc[:idx].tail(10)
-
-                if len(window) < 5:
-                    continue
-
-                cvd_trend = window['cvd_zscore'].iloc[-1] - window['cvd_zscore'].iloc[0]
-                price_trend = (window['price'].iloc[-1] - window['price'].iloc[0]) / window['price'].iloc[0]
-
-                if (cvd_trend > 0 and price_trend < -self.price_change_threshold) or \
-                   (cvd_trend < 0 and price_trend > self.price_change_threshold):
-                    points.append({
-                        'timestamp': symbol_data.loc[idx, 'timestamp'],
-                        'price': symbol_data.loc[idx, 'price'],
-                        'cvd': symbol_data.loc[idx, 'cvd'],
-                        'cvd_zscore': symbol_data.loc[idx, 'cvd_zscore']
-                    })
-
-            if points:
-                divergence_points[symbol] = points
-
-        return divergence_points
+        return divergence_periods_dict
