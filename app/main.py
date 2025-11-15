@@ -310,11 +310,6 @@ def main():
         if divergence_symbols:
             st.success(f"检测到 {len(divergence_symbols)} 个存在背离的标的")
 
-            # 显示背离标的列表
-            st.subheader("背离标的列表")
-            for symbol in divergence_symbols[:20]:  # 最多显示20个
-                st.write(f"⚠️ {symbol}")
-
             # 可视化背离标的
             st.subheader("背离走势可视化")
 
@@ -454,28 +449,46 @@ def main():
                                     st.caption(f"共 {len(periods)} 个背离区间")
 
 
-                    # 显示背离区间详细信息
-                    st.subheader("背离区间详情")
-                    for symbol in display_symbols:
-                        if symbol in divergence_periods:
-                            st.write(f"**{symbol}** 背离区间:")
-                            for i, period in enumerate(divergence_periods[symbol], 1):
-                                # 计算持续时间（分钟）
-                                duration_min = period['duration']
-                                cvd_direction = "上升" if period['cvd_trend'] > 0 else "下降"
-                                price_direction = "上升" if period['price_trend'] > 0 else "下降"
+                    # 获取所有背离区间数据并创建表格
+                    all_divergence_data = []
 
-                                st.markdown(
-                                    f"""
-                                    区间 {i}:
-                                    - **开始时间**: {period['start_time']}
-                                    - **结束时间**: {period['end_time']}
-                                    - **持续时间**: {duration_min} 分钟
-                                    - **背离强度**: {period['strength']:.2f}
-                                    - **CVD趋势**: {cvd_direction} (斜率: {period['cvd_trend']:.3f})
-                                    - **价格趋势**: {price_direction} (斜率: {period['price_trend']:.3f})
-                                    """
-                                )
+                    # 收集所有背离区间的数据
+                    for symbol in divergence_symbols:
+                        if symbol in divergence_periods:
+                            for period in divergence_periods[symbol]:
+                                # 判断背离类型
+                                if period['cvd_trend'] > 0 and period['price_trend'] < 0:
+                                    divergence_type = "🔴 看涨背离"
+                                elif period['cvd_trend'] < 0 and period['price_trend'] > 0:
+                                    divergence_type = "🟢 看跌背离"
+                                else:
+                                    divergence_type = "⚪ 中性"
+
+                                all_divergence_data.append({
+                                    '标的': symbol,
+                                    '背离类型': divergence_type,
+                                    'CVD趋势': "上升" if period['cvd_trend'] > 0 else "下降",
+                                    '价格趋势': "上升" if period['price_trend'] > 0 else "下降",
+                                    '开始时间': period['start_time'],
+                                    '结束时间': period['end_time'],
+                                    '持续时间(分钟)': period['duration'],
+                                    '背离强度': round(period['strength'], 3),
+                                    'CVD斜率': round(period['cvd_trend'], 3),
+                                    '价格斜率': round(period['price_trend'], 3)
+                                })
+
+                    # 按结束时间降序排序（最新的在前）
+                    all_divergence_data.sort(key=lambda x: x['结束时间'], reverse=True)
+
+                    # 显示表格
+                    if all_divergence_data:
+                        st.subheader("背离区间详情表")
+                        df_divergence = pd.DataFrame(all_divergence_data)
+                        st.dataframe(
+                            df_divergence,
+                            use_container_width=True,
+                            hide_index=True
+                        )
         else:
             st.info("ℹ️ 当前未检测到明显的背离")
 
