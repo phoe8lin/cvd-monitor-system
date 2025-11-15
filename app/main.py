@@ -323,8 +323,8 @@ def main():
                 # 如果用户已选择标的，过滤出既是选择的又是背离的
                 display_symbols = [s for s in selected_symbols if s in divergence_symbols]
             else:
-                # 否则显示所有背离标的
-                display_symbols = divergence_symbols[:5]  # 最多显示5个，避免图表过于复杂
+                # 否则显示所有背离标的（最多显示8个，避免页面过长）
+                display_symbols = divergence_symbols[:8]
 
             if display_symbols:
                 # 计算背离数据
@@ -333,109 +333,126 @@ def main():
                 divergence_periods = divergence_detector.get_divergence_periods(df_3day)
 
                 if not divergence_data.empty:
-                    fig = go.Figure()
+                    # 使用多列布局展示每个标的的图表
+                    cols = st.columns(2)  # 2列布局
 
-                    for symbol in display_symbols:
+                    for idx, symbol in enumerate(display_symbols):
                         symbol_data = divergence_data[divergence_data['symbol'] == symbol]
 
                         if not symbol_data.empty:
-                            # 绘制价格线（左Y轴）
-                            fig.add_trace(go.Scatter(
-                                x=symbol_data['timestamp'],
-                                y=symbol_data['price'],
-                                mode='lines',
-                                name=f'{symbol} - 价格',
-                                line=dict(width=2, color='blue'),
-                                yaxis='y',
-                                hovertemplate='<b>%{fullData.name}</b><br>' +
-                                              '时间: %{x}<br>' +
-                                              '价格: %{y:.2f}<br>' +
-                                              '<extra></extra>'
-                            ))
+                            # 选择列
+                            col_idx = idx % 2
+                            with cols[col_idx]:
+                                st.markdown(f"#### {symbol}")
 
-                            # 绘制CVD曲线（右Y轴）
-                            fig.add_trace(go.Scatter(
-                                x=symbol_data['timestamp'],
-                                y=symbol_data['cvd'],
-                                mode='lines',
-                                name=f'{symbol} - CVD',
-                                line=dict(width=2, color='red'),
-                                yaxis='y2',
-                                hovertemplate='<b>%{fullData.name}</b><br>' +
-                                              '时间: %{x}<br>' +
-                                              'CVD: %{y:.2f}<br>' +
-                                              '<extra></extra>'
-                            ))
+                                # 创建单独的图表
+                                fig = go.Figure()
 
-                            # 绘制背离区间（阴影区域）
-                            if symbol in divergence_periods:
-                                for period in divergence_periods[symbol]:
-                                    # 添加背离区间阴影
-                                    fig.add_vrect(
-                                        x0=period['start_time'],
-                                        x1=period['end_time'],
-                                        fillcolor="orange",
-                                        opacity=0.2,
-                                        line_width=0,
-                                        layer="below",
-                                        yref="y2"  # 绑定到右Y轴
-                                    )
+                                # 绘制价格线（左Y轴）
+                                fig.add_trace(go.Scatter(
+                                    x=symbol_data['timestamp'],
+                                    y=symbol_data['price'],
+                                    mode='lines',
+                                    name='价格',
+                                    line=dict(width=2, color='blue'),
+                                    yaxis='y',
+                                    hovertemplate='<b>%{fullData.name}</b><br>' +
+                                                  '时间: %{x}<br>' +
+                                                  '价格: %{y:.2f}<br>' +
+                                                  '<extra></extra>'
+                                ))
 
-                                    # 标记背离开始和结束点
-                                    fig.add_trace(go.Scatter(
-                                        x=[period['start_time']],
-                                        y=[symbol_data[symbol_data['timestamp'] <= period['start_time']]['price'].iloc[-1]],
-                                        mode='markers',
-                                        marker=dict(size=12, color='orange', symbol='triangle-up'),
-                                        name=f'{symbol} 背离开始',
-                                        yaxis='y',
-                                        hovertemplate='<b>%{fullData.name}</b><br>' +
-                                                      f'时间: {period["start_time"]}<br>' +
-                                                      f'强度: {period["strength"]:.2f}<br>' +
-                                                      '<extra></extra>',
-                                        showlegend=(period == divergence_periods[symbol][0])  # 只在第一个区间显示图例
-                                    ))
+                                # 绘制CVD曲线（右Y轴）
+                                fig.add_trace(go.Scatter(
+                                    x=symbol_data['timestamp'],
+                                    y=symbol_data['cvd'],
+                                    mode='lines',
+                                    name='CVD',
+                                    line=dict(width=2, color='red'),
+                                    yaxis='y2',
+                                    hovertemplate='<b>%{fullData.name}</b><br>' +
+                                                  '时间: %{x}<br>' +
+                                                  'CVD: %{y:.2f}<br>' +
+                                                  '<extra></extra>'
+                                ))
 
-                                    fig.add_trace(go.Scatter(
-                                        x=[period['end_time']],
-                                        y=[symbol_data[symbol_data['timestamp'] <= period['end_time']]['price'].iloc[-1]],
-                                        mode='markers',
-                                        marker=dict(size=12, color='orange', symbol='triangle-down'),
-                                        name=f'{symbol} 背离结束',
-                                        yaxis='y',
-                                        hovertemplate='<b>%{fullData.name}</b><br>' +
-                                                      f'时间: {period["end_time"]}<br>' +
-                                                      f'持续: {period["duration"]} 分钟<br>' +
-                                                      '<extra></extra>',
-                                        showlegend=False
-                                    ))
+                                # 绘制背离区间（阴影区域）
+                                if symbol in divergence_periods:
+                                    for period in divergence_periods[symbol]:
+                                        # 添加背离区间阴影
+                                        fig.add_vrect(
+                                            x0=period['start_time'],
+                                            x1=period['end_time'],
+                                            fillcolor="orange",
+                                            opacity=0.2,
+                                            line_width=0,
+                                            layer="below",
+                                            yref="y2"  # 绑定到右Y轴
+                                        )
 
-                    # 更新布局（双Y轴）
-                    fig.update_layout(
-                        height=DIVERGENCE_CHART_HEIGHT,
-                        xaxis_title="时间",
-                        yaxis=dict(
-                            title="价格",
-                            side="left",
-                            color="blue"
-                        ),
-                        yaxis2=dict(
-                            title="CVD值",
-                            side="right",
-                            overlaying="y",
-                            color="red"
-                        ),
-                        hovermode='x unified',
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1
-                        )
-                    )
+                                        # 标记背离开始和结束点
+                                        fig.add_trace(go.Scatter(
+                                            x=[period['start_time']],
+                                            y=[symbol_data[symbol_data['timestamp'] <= period['start_time']]['price'].iloc[-1]],
+                                            mode='markers',
+                                            marker=dict(size=10, color='orange', symbol='triangle-up'),
+                                            name='背离开始',
+                                            yaxis='y',
+                                            hovertemplate='<b>%{fullData.name}</b><br>' +
+                                                          f'时间: {period["start_time"]}<br>' +
+                                                          f'强度: {period["strength"]:.2f}<br>' +
+                                                          '<extra></extra>',
+                                            showlegend=(period == divergence_periods[symbol][0])  # 只在第一个区间显示图例
+                                        ))
 
-                    st.plotly_chart(fig, use_container_width=True)
+                                        fig.add_trace(go.Scatter(
+                                            x=[period['end_time']],
+                                            y=[symbol_data[symbol_data['timestamp'] <= period['end_time']]['price'].iloc[-1]],
+                                            mode='markers',
+                                            marker=dict(size=10, color='orange', symbol='triangle-down'),
+                                            name='背离结束',
+                                            yaxis='y',
+                                            hovertemplate='<b>%{fullData.name}</b><br>' +
+                                                          f'时间: {period["end_time"]}<br>' +
+                                                          f'持续: {period["duration"]} 分钟<br>' +
+                                                          '<extra></extra>',
+                                            showlegend=False
+                                        ))
+
+                                # 更新布局（双Y轴）
+                                fig.update_layout(
+                                    height=350,
+                                    xaxis_title="时间",
+                                    yaxis=dict(
+                                        title="价格",
+                                        side="left",
+                                        color="blue"
+                                    ),
+                                    yaxis2=dict(
+                                        title="CVD值",
+                                        side="right",
+                                        overlaying="y",
+                                        color="red"
+                                    ),
+                                    hovermode='x unified',
+                                    legend=dict(
+                                        orientation="h",
+                                        yanchor="bottom",
+                                        y=1.02,
+                                        xanchor="right",
+                                        x=1
+                                    ),
+                                    margin=dict(l=40, r=40, t=40, b=40)
+                                )
+
+                                # 显示图表
+                                st.plotly_chart(fig, use_container_width=True)
+
+                                # 显示简要信息
+                                if symbol in divergence_periods:
+                                    periods = divergence_periods[symbol]
+                                    st.caption(f"共 {len(periods)} 个背离区间")
+
 
                     # 显示背离区间详细信息
                     st.subheader("背离区间详情")
