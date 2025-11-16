@@ -122,178 +122,13 @@ def main():
 
     # 创建Tab页面
     tab1, tab2, tab3, tab4 = st.tabs([
+        "⚠️ 背离检测",
         "📈 CVD曲线分析",
         "🏆 排名统计",
-        "⚠️ 背离检测",
         "📊 数据概览"
     ])
 
     with tab1:
-        st.header("CVD曲线分析 (Z-Score标准化)")
-        st.write("Z-Score标准化后的CVD曲线，Y轴表示偏离均值的标准差数量")
-
-        # Z-Score说明
-        with st.expander("📘 关于Z-Score分析", expanded=False):
-            st.markdown("""
-            ### Z-Score标准化原理
-            **Z-Score公式**: `(当前CVD值 - 均值) / 标准差`
-
-            ### 分析方法
-            - **无单位，可比较**: 所有数据都转换为"偏离均值多少个标准差"的单位
-            - **直接比较不同标的**: Z-Score为2的标的，其资金推动强度远大于Z-Score为0.5的标的
-
-            ### 动能解读
-            - **零轴上方**: 资金净流入强于平均水平
-            - **零轴下方**: 资金净流入弱于平均水平
-
-            ### 关键区域
-            - **Z-Score > +1**: 持续位于高位且向上倾斜 → 🔴 **强势买入动能**
-            - **Z-Score < -1**: 持续位于低位且向下倾斜 → 🟢 **强势卖出动能**
-            - **零轴附近**: 动能中性，多空平衡 → ⚪ **中性状态**
-
-            ### 参考线说明
-            - **灰色实线**: 零轴（均值线）
-            - **红色虚线**: +1标准差阈值
-            - **绿色虚线**: -1标准差阈值
-            """)
-
-        # 计算Z-Score
-        zscore_calc = CVDScoreCalculator()
-        df_with_zscore = zscore_calc.calculate_all_z_scores(filtered_df)
-
-        # 创建CVD曲线图
-        fig = go.Figure()
-
-        # 为每个标的添加一条线
-        for symbol in selected_symbols:
-            symbol_data = df_with_zscore[df_with_zscore['symbol'] == symbol]
-            if not symbol_data.empty:
-                fig.add_trace(go.Scatter(
-                    x=symbol_data['timestamp'],
-                    y=symbol_data['cvd_zscore'],
-                    mode='lines',
-                    name=symbol,
-                    line=dict(width=2),
-                    hovertemplate='<b>%{fullData.name}</b><br>' +
-                                  '时间: %{x}<br>' +
-                                  'Z-Score: %{y:.2f}<br>' +
-                                  '<extra></extra>'
-                ))
-
-        # 添加零轴参考线
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
-        fig.add_hline(y=1, line_dash="dash", line_color="red", opacity=0.3)
-        fig.add_hline(y=-1, line_dash="dash", line_color="green", opacity=0.3)
-
-        # 更新布局
-        fig.update_layout(
-            height=CHART_HEIGHT,
-            xaxis_title="时间",
-            yaxis_title="CVD Z-Score",
-            hovermode='x unified',
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
-    with tab2:
-        st.header("排名统计")
-
-        # 创建两个子列
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("📊 交易量排名 (最新)")
-
-            # 交易量排名
-            rank_calc = RankCalculator()
-            volume_ranking = rank_calc.calculate_rankings(filtered_df, 'period_volume')
-
-            # 只显示前20名
-            display_data = volume_ranking.head(20)
-
-            fig = px.bar(
-                display_data,
-                x='value',
-                y='symbol',
-                orientation='h',
-                title="交易量 Top 20",
-                color='value',
-                color_continuous_scale='Blues',
-                text='rank'
-            )
-
-            fig.update_layout(
-                height=RANKING_CHART_HEIGHT,
-                yaxis={'categoryorder': 'total ascending'},
-                xaxis_title="交易量",
-                yaxis_title="标的"
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            st.subheader("📈 交易笔数排名 (最新)")
-
-            # 交易笔数排名
-            trade_ranking = rank_calc.calculate_rankings(filtered_df, 'trade_count')
-
-            # 只显示前20名
-            display_data = trade_ranking.head(20)
-
-            fig = px.bar(
-                display_data,
-                x='value',
-                y='symbol',
-                orientation='h',
-                title="交易笔数 Top 20",
-                color='value',
-                color_continuous_scale='Greens',
-                text='rank'
-            )
-
-            fig.update_layout(
-                height=RANKING_CHART_HEIGHT,
-                yaxis={'categoryorder': 'total ascending'},
-                xaxis_title="交易笔数",
-                yaxis_title="标的"
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-
-        # CVD排名
-        st.subheader("💎 CVD排名 (最新)")
-        cvd_ranking = rank_calc.calculate_rankings(filtered_df, 'cvd')
-
-        display_data = cvd_ranking.head(20)
-
-        fig = px.bar(
-            display_data,
-            x='value',
-            y='symbol',
-            orientation='h',
-            title="CVD Top 20",
-            color='value',
-            color_continuous_scale='Reds',
-            text='rank'
-        )
-
-        fig.update_layout(
-            height=RANKING_CHART_HEIGHT,
-            yaxis={'categoryorder': 'total ascending'},
-            xaxis_title="CVD值",
-            yaxis_title="标的"
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
-    with tab3:
         st.header("CVD与价格背离检测")
         st.write("检测近3天内CVD与价格走势背离的标的")
 
@@ -310,22 +145,74 @@ def main():
         if divergence_symbols:
             st.success(f"检测到 {len(divergence_symbols)} 个存在背离的标的")
 
+            # 获取背离区间信息
+            divergence_periods = divergence_detector.get_divergence_periods(df_3day)
+
+            # 获取所有背离区间数据并创建表格
+            all_divergence_data = []
+
+            # 收集所有背离区间的数据
+            for symbol in divergence_symbols:
+                if symbol in divergence_periods:
+                    for period in divergence_periods[symbol]:
+                        # 判断背离类型
+                        if period['cvd_trend'] > 0 and period['price_trend'] < 0:
+                            divergence_type = "🔴 看涨背离"
+                        elif period['cvd_trend'] < 0 and period['price_trend'] > 0:
+                            divergence_type = "🟢 看跌背离"
+                        else:
+                            divergence_type = "⚪ 中性"
+
+                        all_divergence_data.append({
+                            '标的': symbol,
+                            '背离类型': divergence_type,
+                            'CVD趋势': "上升" if period['cvd_trend'] > 0 else "下降",
+                            '价格趋势': "上升" if period['price_trend'] > 0 else "下降",
+                            '开始时间': period['start_time'],
+                            '结束时间': period['end_time'],
+                            '持续时间(分钟)': period['duration'],
+                            '背离强度': round(period['strength'], 3),
+                            'CVD斜率': round(period['cvd_trend'], 3),
+                            '价格斜率': round(period['price_trend'], 3)
+                        })
+
+            # 按结束时间降序排序（最新的在前）
+            all_divergence_data.sort(key=lambda x: x['结束时间'], reverse=True)
+
+            # 显示表格
+            if all_divergence_data:
+                st.subheader("背离区间详情表")
+                df_divergence = pd.DataFrame(all_divergence_data)
+                st.dataframe(
+                    df_divergence,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
             # 可视化背离标的
             st.subheader("背离走势可视化")
 
-            # 如果选择了背离标的，只显示这些
-            if len(selected_symbols) < len(all_symbols):
-                # 如果用户已选择标的，过滤出既是选择的又是背离的
-                display_symbols = [s for s in selected_symbols if s in divergence_symbols]
+            # 根据详情表的顺序获取唯一的标的列表
+            if all_divergence_data:
+                # 按照详情表中标的出现的顺序（保持唯一性）
+                ordered_symbols = []
+                for item in all_divergence_data:
+                    symbol = item['标的']
+                    if symbol not in ordered_symbols:
+                        ordered_symbols.append(symbol)
+                
+                # 如果用户选择了标的，过滤出既是选择的又是背离的
+                if len(selected_symbols) < len(all_symbols):
+                    display_symbols = [s for s in ordered_symbols if s in selected_symbols]
+                else:
+                    # 否则显示所有背离标的（最多显示8个，避免页面过长）
+                    display_symbols = ordered_symbols[:8]
             else:
-                # 否则显示所有背离标的（最多显示8个，避免页面过长）
-                display_symbols = divergence_symbols[:8]
+                display_symbols = []
 
             if display_symbols:
                 # 计算背离数据
                 divergence_data = divergence_detector.calculate_divergence_data(df_3day, display_symbols)
-                # 获取背离区间信息
-                divergence_periods = divergence_detector.get_divergence_periods(df_3day)
 
                 if not divergence_data.empty:
                     # 使用多列布局展示每个标的的图表
@@ -447,50 +334,174 @@ def main():
                                 if symbol in divergence_periods:
                                     periods = divergence_periods[symbol]
                                     st.caption(f"共 {len(periods)} 个背离区间")
-
-
-                    # 获取所有背离区间数据并创建表格
-                    all_divergence_data = []
-
-                    # 收集所有背离区间的数据
-                    for symbol in divergence_symbols:
-                        if symbol in divergence_periods:
-                            for period in divergence_periods[symbol]:
-                                # 判断背离类型
-                                if period['cvd_trend'] > 0 and period['price_trend'] < 0:
-                                    divergence_type = "🔴 看涨背离"
-                                elif period['cvd_trend'] < 0 and period['price_trend'] > 0:
-                                    divergence_type = "🟢 看跌背离"
-                                else:
-                                    divergence_type = "⚪ 中性"
-
-                                all_divergence_data.append({
-                                    '标的': symbol,
-                                    '背离类型': divergence_type,
-                                    'CVD趋势': "上升" if period['cvd_trend'] > 0 else "下降",
-                                    '价格趋势': "上升" if period['price_trend'] > 0 else "下降",
-                                    '开始时间': period['start_time'],
-                                    '结束时间': period['end_time'],
-                                    '持续时间(分钟)': period['duration'],
-                                    '背离强度': round(period['strength'], 3),
-                                    'CVD斜率': round(period['cvd_trend'], 3),
-                                    '价格斜率': round(period['price_trend'], 3)
-                                })
-
-                    # 按结束时间降序排序（最新的在前）
-                    all_divergence_data.sort(key=lambda x: x['结束时间'], reverse=True)
-
-                    # 显示表格
-                    if all_divergence_data:
-                        st.subheader("背离区间详情表")
-                        df_divergence = pd.DataFrame(all_divergence_data)
-                        st.dataframe(
-                            df_divergence,
-                            use_container_width=True,
-                            hide_index=True
-                        )
         else:
             st.info("ℹ️ 当前未检测到明显的背离")
+
+    with tab2:
+        st.header("CVD曲线分析 (Z-Score标准化)")
+        st.write("Z-Score标准化后的CVD曲线,Y轴表示偏离均值的标准差数量")
+
+        # Z-Score说明
+        with st.expander("📘 关于Z-Score分析", expanded=False):
+            st.markdown("""
+            ### Z-Score标准化原理
+            **Z-Score公式**: `(当前CVD值 - 均值) / 标准差`
+
+            ### 分析方法
+            - **无单位，可比较**: 所有数据都转换为"偏离均值多少个标准差"的单位
+            - **直接比较不同标的**: Z-Score为2的标的，其资金推动强度远大于Z-Score为0.5的标的
+
+            ### 动能解读
+            - **零轴上方**: 资金净流入强于平均水平
+            - **零轴下方**: 资金净流入弱于平均水平
+
+            ### 关键区域
+            - **Z-Score > +1**: 持续位于高位且向上倾斜 → 🔴 **强势买入动能**
+            - **Z-Score < -1**: 持续位于低位且向下倾斜 → 🟢 **强势卖出动能**
+            - **零轴附近**: 动能中性，多空平衡 → ⚪ **中性状态**
+
+            ### 参考线说明
+            - **灰色实线**: 零轴（均值线）
+            - **红色虚线**: +1标准差阈值
+            - **绿色虚线**: -1标准差阈值
+            """)
+
+        # 计算Z-Score
+        zscore_calc = CVDScoreCalculator()
+        df_with_zscore = zscore_calc.calculate_all_z_scores(filtered_df)
+
+        # 创建CVD曲线图
+        fig = go.Figure()
+
+        # 为每个标的添加一条线
+        for symbol in selected_symbols:
+            symbol_data = df_with_zscore[df_with_zscore['symbol'] == symbol]
+            if not symbol_data.empty:
+                fig.add_trace(go.Scatter(
+                    x=symbol_data['timestamp'],
+                    y=symbol_data['cvd_zscore'],
+                    mode='lines',
+                    name=symbol,
+                    line=dict(width=2),
+                    hovertemplate='<b>%{fullData.name}</b><br>' +
+                                  '时间: %{x}<br>' +
+                                  'Z-Score: %{y:.2f}<br>' +
+                                  '<extra></extra>'
+                ))
+
+        # 添加零轴参考线
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+        fig.add_hline(y=1, line_dash="dash", line_color="red", opacity=0.3)
+        fig.add_hline(y=-1, line_dash="dash", line_color="green", opacity=0.3)
+
+        # 更新布局
+        fig.update_layout(
+            height=CHART_HEIGHT,
+            xaxis_title="时间",
+            yaxis_title="CVD Z-Score",
+            hovermode='x unified',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    with tab3:
+        st.header("排名统计")
+
+        # 创建两个子列
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("📊 交易量排名 (最新)")
+
+            # 交易量排名
+            rank_calc = RankCalculator()
+            volume_ranking = rank_calc.calculate_rankings(filtered_df, 'period_volume')
+
+            # 只显示前20名
+            display_data = volume_ranking.head(20)
+
+            fig = px.bar(
+                display_data,
+                x='value',
+                y='symbol',
+                orientation='h',
+                title="交易量 Top 20",
+                color='value',
+                color_continuous_scale='Blues',
+                text='rank'
+            )
+
+            fig.update_layout(
+                height=RANKING_CHART_HEIGHT,
+                yaxis={'categoryorder': 'total ascending'},
+                xaxis_title="交易量",
+                yaxis_title="标的"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            st.subheader("📈 交易笔数排名 (最新)")
+
+            # 交易笔数排名
+            trade_ranking = rank_calc.calculate_rankings(filtered_df, 'trade_count')
+
+            # 只显示前20名
+            display_data = trade_ranking.head(20)
+
+            fig = px.bar(
+                display_data,
+                x='value',
+                y='symbol',
+                orientation='h',
+                title="交易笔数 Top 20",
+                color='value',
+                color_continuous_scale='Greens',
+                text='rank'
+            )
+
+            fig.update_layout(
+                height=RANKING_CHART_HEIGHT,
+                yaxis={'categoryorder': 'total ascending'},
+                xaxis_title="交易笔数",
+                yaxis_title="标的"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        # CVD排名
+        st.subheader("💎 CVD排名 (最新)")
+        cvd_ranking = rank_calc.calculate_rankings(filtered_df, 'cvd')
+
+        display_data = cvd_ranking.head(20)
+
+        fig = px.bar(
+            display_data,
+            x='value',
+            y='symbol',
+            orientation='h',
+            title="CVD Top 20",
+            color='value',
+            color_continuous_scale='Reds',
+            text='rank'
+        )
+
+        fig.update_layout(
+            height=RANKING_CHART_HEIGHT,
+            yaxis={'categoryorder': 'total ascending'},
+            xaxis_title="CVD值",
+            yaxis_title="标的"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
 
     with tab4:
         st.header("数据概览")
